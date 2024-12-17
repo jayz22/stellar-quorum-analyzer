@@ -19,7 +19,9 @@ use itertools::Itertools;
 //
 // Constrain #1: A is not empty and B is not empty
 // Constrain #2: There do NOT exist a validator in both quorums
-// Constrain #3: If a validator is in a quorum, then the quorum must satisfy its qset
+// Constrain #3: If a vertex is in a quorum, then the quorum must satisfy its
+// dependencies. I.e. any threshold number out of all sucessors needs to be in
+// the quorum as well.
 //
 // These three constrains must all be hold.
 //
