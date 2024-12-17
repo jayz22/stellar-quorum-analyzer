@@ -1,0 +1,32 @@
+[package]
+name = "stellar-quorum-checker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+petgraph = "0.6.5"
+stellar-xdr = "=22.0.0"
+json = "0.12.4"
+nnf = "=0.1.0"
+varisat = "*"
+itertools = "*"
+
+[dev-dependencies]
+screwsat = "=2.1.5"
+batsat = "*"
+splr = "=0.17.2"
+rustsat = "*"
+# CreuSAT = { git = "https://github.com/sarsko/CreuSAT.git", rev = "b36aacd53874c49e77493ac6ecceabf0b1968154"}
+prettytable = "*"
+dimacs="*"
+rustsat-ipasir = "*"
+rustsat-cadical = "*"
+rustsat-glucose = "*"
+rustsat-kissat  = "*"
+rustsat-minisat = "*"
+
+[[bench]]
+harness = false
+bench = true
+name = "solver_comparison"
+path = "benches/solver_comparison.rs"
