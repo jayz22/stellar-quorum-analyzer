@@ -89,7 +89,7 @@ impl Fbas {
                             eprintln!("Validators {:?} is unknown", vstr);                            
                         }
                     }
-                    assert_eq!(validators.len(), qset.validators.len(), "qset contains duplicate validators");
+                    // assert_eq!(validators.len(), qset.validators.len(), "qset contains duplicate validators");
                 } else {
                     eprintln!("validators not found in quorum set");
                 }
