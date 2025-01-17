@@ -51,6 +51,14 @@ struct BatSat {
     solver: Option<BatSatSolver<BasicCallbacks>>
 }
 
+fn measure_execution<T, F: FnOnce() -> T>(f: F) -> (u64, T) {
+    let start_time = Instant::now();
+    let result = f();
+    let stop_time = Instant::now();
+    let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
+    (time_usecs, result)
+}
+
 pub(crate) trait CNFSolverMeasurement {
     fn measured_setup(&mut self, path: &Path) -> std::io::Result<u64>;
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)>;
@@ -60,30 +68,22 @@ pub(crate) trait CNFSolverMeasurement {
 impl CNFSolverMeasurement for ScrewSat {
     fn measured_setup(&mut self, path: &Path) -> std::io::Result<u64> {
         let input = File::open(path).unwrap();
-        let start_time = Instant::now();
-        // println!("{:?}", input);
-        let cnf = screwsat::util::parse_cnf(input).unwrap();
-        let variable_num = cnf.var_num.unwrap();
-        let clauses = cnf.clauses;
-        self.solver = Some(ScrewSatSolver::new(variable_num, &clauses));
-        let stop_time = Instant::now();
-        let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-        // println!("screwsat setup duration {time_usecs}");
+        let (time_usecs, ()) = measure_execution(|| {
+            let cnf = screwsat::util::parse_cnf(input).unwrap();
+            self.solver = Some(ScrewSatSolver::new(cnf.var_num.unwrap(), &cnf.clauses));
+        });
         Ok(time_usecs)
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
         if let Some(sat) = &mut self.solver {
-            let start_time = Instant::now();
-            let status = match sat.solve(None) {
-                screwsat::solver::Status::Sat => Status::SAT,
-                screwsat::solver::Status::Unsat => Status::UNSAT,
-                screwsat::solver::Status::Indeterminate => panic!("solver stopped searching"),
-            };
-            let stop_time = Instant::now();
-            let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-            // println!("{:?}", status);
-            // println!("screwsat solve duration {time_usecs}");
+            let (time_usecs, status) = measure_execution(|| {
+                match sat.solve(None) {
+                    screwsat::solver::Status::Sat => Status::SAT,
+                    screwsat::solver::Status::Unsat => Status::UNSAT,
+                    screwsat::solver::Status::Indeterminate => panic!("solver stopped searching"),
+                }
+            });
             Ok((time_usecs, status))
         } else {
             panic!("solver has not been setup")
@@ -99,29 +99,22 @@ impl <'a> CNFSolverMeasurement for VariSat<'a> {
     fn measured_setup(&mut self, path: &Path) -> std::io::Result<u64> {
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
-        
-        let start_time = Instant::now();
-        let mut solver = VariSatSolver::new();
-        solver.add_dimacs_cnf(reader).unwrap();
-        let stop_time = Instant::now();
-        let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-        // println!("varisat setup duration {time_usecs}");
-        
-        self.solver = Some(solver);
+        let (time_usecs, ()) = measure_execution(|| {
+            let mut solver = VariSatSolver::new();
+            solver.add_dimacs_cnf(reader).unwrap();
+            self.solver = Some(solver);
+        });
         Ok(time_usecs)
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
         if let Some(sat) = &mut self.solver {            
-            let start_time = Instant::now();
-            let status = match sat.solve().unwrap(){
-                true => Status::SAT,
-                false => Status::UNSAT,
-            };
-            let stop_time = Instant::now();
-            let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-            // println!("{res}");
-            // println!("varisat solve duration {time_usecs}");
+            let (time_usecs, status) = measure_execution(|| {
+                match sat.solve().unwrap() {
+                    true => Status::SAT,
+                    false => Status::UNSAT,
+                }
+            });
             Ok((time_usecs, status))
         } else {
             panic!("solver has not been setup")
@@ -132,28 +125,24 @@ impl <'a> CNFSolverMeasurement for VariSat<'a> {
         "VariSat".to_string()
     }
 }
+
 impl CNFSolverMeasurement for Splr {
     fn measured_setup(&mut self, path: &Path) -> std::io::Result<u64> {
-        let start_time = Instant::now();
-        self.solver = Some(SplrSolver::try_from(path).unwrap());
-        let stop_time = Instant::now();
-        let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-        // println!("splr setup duration {time_usecs}");
+        let (time_usecs, ()) = measure_execution(|| {
+            self.solver = Some(SplrSolver::try_from(path).unwrap());
+        });
         Ok(time_usecs)
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
         if let Some(sat) = &mut self.solver {            
-            let start_time = Instant::now();
-            let status = match sat.solve().unwrap() {
-                splr::Certificate::SAT(_) => Status::SAT,
-                splr::Certificate::UNSAT => Status::UNSAT,
-            };
-            let stop_time = Instant::now();
-            let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-            // println!("{res:?}");
-            // println!("splr solve duration {time_usecs}");    
-            Ok((time_usecs, status))        
+            let (time_usecs, status) = measure_execution(|| {
+                match sat.solve().unwrap() {
+                    splr::Certificate::SAT(_) => Status::SAT,
+                    splr::Certificate::UNSAT => Status::UNSAT,
+                }
+            });
+            Ok((time_usecs, status))
         } else {
             panic!("solver has not been setup")
         }
@@ -168,30 +157,26 @@ impl CNFSolverMeasurement for BatSat {
     fn measured_setup(&mut self, path: &Path) -> std::io::Result<u64> {
         let file = File::open(path).unwrap();
         let mut reader = BufReader::new(file);
-        
-        let start_time = Instant::now();
-        let mut solver = BatSatSolver::new(Default::default(), Default::default());
-        parse(&mut reader, &mut solver, true, false).unwrap();
-        let stop_time = Instant::now();
-        let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-        
-        self.solver = Some(solver);
+        let (time_usecs, ()) = measure_execution(|| {
+            let mut solver = BatSatSolver::new(Default::default(), Default::default());
+            parse(&mut reader, &mut solver, true, false).unwrap();
+            self.solver = Some(solver);
+        });
         Ok(time_usecs)
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
         if let Some(sat) = &mut self.solver {            
-            let start_time = Instant::now();
-            let res = sat.solve_limited(&[]);
-            let stop_time = Instant::now();
-            let time_usecs = stop_time.duration_since(start_time).as_micros() as u64;
-            let status = if res == lbool::TRUE {
-                Status::SAT
-            } else if res == lbool::FALSE {
-                Status::UNSAT
-            } else {
-                panic!("Solver returned UNDEF")
-            };
+            let (time_usecs, status) = measure_execution(|| {
+                let res = sat.solve_limited(&[]);
+                if res == lbool::TRUE {
+                    Status::SAT
+                } else if res == lbool::FALSE {
+                    Status::UNSAT
+                } else {
+                    panic!("Solver returned UNDEF")
+                }
+            });
             Ok((time_usecs, status))
         } else {
             panic!("solver has not been setup")
@@ -253,7 +238,6 @@ fn output_results(results: &BTreeMap<OsString, Vec<MeasurementResult>>) -> std::
 }
 
 fn main() -> std::io::Result<()> {
-
     assert!(Path::new(FILE_PATH).is_dir(), "Directory not found: {}", FILE_PATH);
 
     let mut results: BTreeMap<OsString, Vec<MeasurementResult>> = Default::default();

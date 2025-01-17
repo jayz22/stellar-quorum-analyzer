@@ -7,23 +7,19 @@ edition = "2021"
 petgraph = "0.6.5"
 stellar-xdr = "=22.0.0"
 json = "0.12.4"
-nnf = "=0.1.0"
-varisat = "*"
 itertools = "*"
 
+[dependencies.batsat]
+version = "0.5.0"
+git = "https://github.com/c-cube/batsat.git"
+rev = "6cc3b2eb2d9585e6ee7743a414b816acf2a07056"
+
 [dev-dependencies]
+varisat = "=0.2.2"
 screwsat = "=2.1.5"
-batsat = "*"
 splr = "=0.17.2"
-rustsat = "*"
-# CreuSAT = { git = "https://github.com/sarsko/CreuSAT.git", rev = "b36aacd53874c49e77493ac6ecceabf0b1968154"}
-prettytable = "*"
-dimacs="*"
-rustsat-ipasir = "*"
-rustsat-cadical = "*"
-rustsat-glucose = "*"
-rustsat-kissat  = "*"
-rustsat-minisat = "*"
+prettytable = "0.10.0"
+dimacs = "0.2.0"
 
 [[bench]]
 harness = false
