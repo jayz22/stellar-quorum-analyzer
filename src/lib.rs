@@ -1,3 +1,5 @@
+mod allocator;
+
 pub mod fbas;
 pub use fbas::*;
 pub mod fbas_analyze;
