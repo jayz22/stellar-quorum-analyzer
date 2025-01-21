@@ -24,4 +24,7 @@ unsafe impl GlobalAlloc for LimitedAllocator {
 }
 
 #[global_allocator]
-static ALLOCATOR: LimitedAllocator = LimitedAllocator { limit: 1024 * 1024 * 1024, allocated: AtomicUsize::new(0) }; // 1GB
+static ALLOCATOR: LimitedAllocator = LimitedAllocator {
+    limit: 1024 * 1024 * 1024,
+    allocated: AtomicUsize::new(0),
+}; // 1GB

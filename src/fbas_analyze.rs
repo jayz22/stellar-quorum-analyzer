@@ -1,8 +1,11 @@
 use crate::Fbas;
-use batsat::{intmap::AsIndex, lbool, Callbacks, Lit, Solver, SolverInterface, Var};
-use petgraph::{csr::IndexType, graph::NodeIndex};
+use batsat::{
+    callbacks::{AsyncInterrupt, AsyncInterruptHandle},
+    intmap::AsIndex,
+    lbool, Lit, Solver, SolverInterface, Var,
+};
 use itertools::Itertools;
-
+use petgraph::{csr::IndexType, graph::NodeIndex};
 
 // Two imaginary quorums A and B, and we have FBAS system with V vertices. Note
 // the a quorum contain validators, whereas a vertex can be either a validator
@@ -55,93 +58,123 @@ impl FbasLitsWrapper {
     }
 }
 
-pub fn fbas_enjoys_quorum_intersection<Cb: Callbacks>(fbas: &Fbas, cb: Cb) -> bool {
-    let fbas_lits = FbasLitsWrapper::new(fbas.graph.node_count());
-    let mut solver = Solver::new(Default::default(), cb);
-    // for each vertice in the graph, we add a variable representing it belonging to quorum A and quorum B
-    fbas.graph.node_indices().for_each(|_| {
-        solver.new_var_default();
-        solver.new_var_default();
-    });
-    debug_assert!(solver.num_vars() as usize == fbas.graph.node_count() * 2);
+pub struct FbasAnalyzer {
+    solver: Solver<AsyncInterrupt>,
+    interrupt_handle: AsyncInterruptHandle,
+}
 
-    // formula 1: both quorums are non-empty -- at least one validator must exist in each quorum
-    let mut quorums_not_empty: (Vec<Lit>, Vec<Lit>) = fbas.validators.iter().map(|ni| {
-        (fbas_lits.in_quorum_a(ni), fbas_lits.in_quorum_b(ni))
-    }).collect();
-    solver.add_clause_reuse(&mut quorums_not_empty.0);
-    solver.add_clause_reuse(&mut quorums_not_empty.1);
+impl FbasAnalyzer {
+    pub fn new(fbas: &Fbas) -> Result<Self, Box<dyn std::error::Error>> {
+        let cb = AsyncInterrupt::default();
+        let interrupt_handle = cb.get_handle();
+        let mut analyzer = Self {
+            solver: Solver::new(Default::default(), cb),
+            interrupt_handle,
+        };
+        analyzer.construct_formula(fbas)?;
+        Ok(analyzer)
+    }
 
-    // formula 2: two quorums do not intersect -- no validator can appear in both quorums
-    fbas.validators.iter().for_each(|ni| {
-        solver.add_clause_reuse(&mut vec![!fbas_lits.in_quorum_a(ni), !fbas_lits.in_quorum_b(ni)]);
-    });
+    fn construct_formula(&mut self, fbas: &Fbas) -> Result<(), Box<dyn std::error::Error>> {
+        let fbas_lits = FbasLitsWrapper::new(fbas.graph.node_count());
 
-    // formula 3: qset relation for each vertice must be satisfied
-    let mut add_clauses_for_quorum_relations = |in_quorum: &dyn Fn(&NodeIndex) -> Lit| {    
-        fbas.graph.node_indices().for_each(|ni| {
-            let aq_i = in_quorum(&ni);
-            let nd = fbas.graph.node_weight(ni).unwrap();
-            let threshold = nd.get_threshold();
-            let neighbors = fbas.graph.neighbors(ni);
-            let qset = neighbors.into_iter().combinations(threshold as usize);
-    
-            let mut third_term = vec![];
-            third_term.push(!aq_i);
-            for (_j, q_slice) in qset.enumerate() {
-                // create a new proposition as per Tseitin transformation
-                let xi_j = fbas_lits.new_proposition(&mut solver);
-    
-                // this is the second part in the qsat_i^{A} equation
-                let mut neg_pi_j = vec![];
-                neg_pi_j.push(!aq_i);
-                neg_pi_j.push(xi_j);
-                for (_k, elem) in q_slice.iter().enumerate() {
-                    // get lit for elem                    
-                    let elit = in_quorum(elem);
-                    neg_pi_j.push(!elit);
-                    // this is the first part of the equation
-                    solver.add_clause_reuse(&mut vec![!aq_i, !xi_j, elit]);
-                }
-                solver.add_clause_reuse(&mut neg_pi_j);
-    
-                third_term.push(xi_j);
-            }
-            solver.add_clause_reuse(&mut third_term);
+        // for each vertice in the graph, we add a variable representing it belonging to quorum A and quorum B
+        fbas.graph.node_indices().for_each(|_| {
+            self.solver.new_var_default();
+            self.solver.new_var_default();
         });
-    };
+        debug_assert!(self.solver.num_vars() as usize == fbas.graph.node_count() * 2);
 
-    add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_a(ni));
-    add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_b(ni));
-    
-    let status = solver.solve_limited(&[]);
-    status == lbool::TRUE
+        // formula 1: both quorums are non-empty -- at least one validator must exist in each quorum
+        let mut quorums_not_empty: (Vec<Lit>, Vec<Lit>) = fbas
+            .validators
+            .iter()
+            .map(|ni| (fbas_lits.in_quorum_a(ni), fbas_lits.in_quorum_b(ni)))
+            .collect();
+        self.solver.add_clause_reuse(&mut quorums_not_empty.0);
+        self.solver.add_clause_reuse(&mut quorums_not_empty.1);
+
+        // formula 2: two quorums do not intersect -- no validator can appear in both quorums
+        fbas.validators.iter().for_each(|ni| {
+            self.solver.add_clause_reuse(&mut vec![
+                !fbas_lits.in_quorum_a(ni),
+                !fbas_lits.in_quorum_b(ni),
+            ]);
+        });
+
+        // formula 3: qset relation for each vertice must be satisfied
+        let mut add_clauses_for_quorum_relations = |in_quorum: &dyn Fn(&NodeIndex) -> Lit| {
+            fbas.graph.node_indices().for_each(|ni| {
+                let aq_i = in_quorum(&ni);
+                let nd = fbas.graph.node_weight(ni).unwrap();
+                let threshold = nd.get_threshold();
+                let neighbors = fbas.graph.neighbors(ni);
+                let qset = neighbors.into_iter().combinations(threshold as usize);
+
+                let mut third_term = vec![];
+                third_term.push(!aq_i);
+                for (_j, q_slice) in qset.enumerate() {
+                    // create a new proposition as per Tseitin transformation
+                    let xi_j = fbas_lits.new_proposition(&mut self.solver);
+
+                    // this is the second part in the qsat_i^{A} equation
+                    let mut neg_pi_j = vec![];
+                    neg_pi_j.push(!aq_i);
+                    neg_pi_j.push(xi_j);
+                    for (_k, elem) in q_slice.iter().enumerate() {
+                        // get lit for elem
+                        let elit = in_quorum(elem);
+                        neg_pi_j.push(!elit);
+                        // this is the first part of the equation
+                        self.solver.add_clause_reuse(&mut vec![!aq_i, !xi_j, elit]);
+                    }
+                    self.solver.add_clause_reuse(&mut neg_pi_j);
+
+                    third_term.push(xi_j);
+                }
+                self.solver.add_clause_reuse(&mut third_term);
+            });
+        };
+
+        add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_a(ni));
+        add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_b(ni));
+        Ok(())
+    }
+
+    pub fn solve(&mut self) -> bool {
+        let status = self.solver.solve_limited(&[]);
+        status == lbool::TRUE
+    }
+
+    pub fn interrupt(&self) {
+        self.interrupt_handle.interrupt_async();
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use batsat::BasicCallbacks;
-    use crate::{fbas_enjoys_quorum_intersection, Fbas};
+    use crate::{Fbas, FbasAnalyzer};
     use std::{io::BufRead, str::FromStr};
 
     #[test]
-    fn test() -> std::io::Result<()> { 
+    fn test() -> std::io::Result<()> {
         let mut test_cases = vec![];
         for entry in std::fs::read_dir("./tests/test_data/")? {
             let path = entry?.path();
             if let Some(extension) = path.extension() {
-                if extension == "json"{
+                if extension == "json" {
                     let case = path.file_stem().unwrap().to_os_string();
                     test_cases.push(case);
                     let fbas = Fbas::from_json(path.as_os_str().to_str().unwrap()).unwrap();
-                    let res = fbas_enjoys_quorum_intersection(&fbas, BasicCallbacks::new());      
+                    let mut solver = FbasAnalyzer::new(&fbas).unwrap();
+                    let res = solver.solve();
                     println!("{res:?}");
                 }
             }
-        }   
+        }
         Ok(())
     }
-    
+
     #[test]
     fn test_random_data() -> std::io::Result<()> {
         let mut test_cases = vec![];
@@ -149,30 +182,31 @@ mod test {
         for entry in std::fs::read_dir("./tests/test_data/random/")? {
             let path = entry?.path();
             if let Some(extension) = path.extension() {
-                if extension == "dimacs"{
+                if extension == "dimacs" {
                     let case = path.file_stem().unwrap().to_os_string();
                     test_cases.push(case);
                 }
-            }        
+            }
         }
-    
+
         for case in test_cases {
             let mut json_file = dir_path.clone();
             json_file.push(case.clone());
             json_file.push(".json");
-    
+
             let mut dimacs_file = dir_path.clone();
             dimacs_file.push(case.clone());
             dimacs_file.push(".dimacs");
-    
+
             let fbas = Fbas::from_json(json_file.as_os_str().to_str().unwrap()).unwrap();
-            let res = fbas_enjoys_quorum_intersection(&fbas, BasicCallbacks::new());
-            
+            let mut solver = FbasAnalyzer::new(&fbas).unwrap();
+            let res = solver.solve();
             {
                 // Open and read the file line by line
-                let file = std::fs::File::open(dimacs_file).expect("Failed to open the DIMACS file");
+                let file =
+                    std::fs::File::open(dimacs_file).expect("Failed to open the DIMACS file");
                 let reader = std::io::BufReader::new(file);
-    
+
                 // Look for the result comment line
                 let mut expected = false;
                 for line in reader.lines() {
@@ -193,4 +227,3 @@ mod test {
         Ok(())
     }
 }
-

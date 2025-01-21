@@ -1,15 +1,22 @@
-use std::{collections::BTreeMap, ffi::OsString, fs::File, io::{BufReader, Write}, path::Path, time::Instant}; 
-use prettytable::{Table, Row, Cell, format};
-use screwsat::solver::Solver as ScrewSatSolver;
-use varisat::Solver as VariSatSolver;
-use splr::{Solver as SplrSolver, SolveIF};
 use batsat::{dimacs::parse, lbool, BasicCallbacks, Solver as BatSatSolver, SolverInterface};
+use prettytable::{format, Cell, Row, Table};
+use screwsat::solver::Solver as ScrewSatSolver;
+use splr::{SolveIF, Solver as SplrSolver};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    fs::File,
+    io::{BufReader, Write},
+    path::Path,
+    time::Instant,
+};
+use varisat::Solver as VariSatSolver;
 
 const FILE_PATH: &str = "tests/test_data/random";
 
 #[derive(Default, Debug)]
 pub(crate) enum Status {
-    #[default] 
+    #[default]
     UNSAT,
     SAT,
 }
@@ -19,7 +26,8 @@ impl ToString for Status {
         match self {
             Status::UNSAT => "UNSAT",
             Status::SAT => "SAT",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
@@ -28,27 +36,27 @@ pub(crate) struct MeasurementResult {
     pub solver_name: String,
     pub setup_time: u64,
     pub solve_time: u64,
-    pub status: Status
+    pub status: Status,
 }
 
 #[derive(Default)]
 struct ScrewSat {
-    solver: Option<ScrewSatSolver>
+    solver: Option<ScrewSatSolver>,
 }
 
 #[derive(Default)]
 struct VariSat<'a> {
-    solver: Option<VariSatSolver<'a>>
+    solver: Option<VariSatSolver<'a>>,
 }
 
 #[derive(Default)]
 struct Splr {
-    solver: Option<SplrSolver>
+    solver: Option<SplrSolver>,
 }
 
 #[derive(Default)]
 struct BatSat {
-    solver: Option<BatSatSolver<BasicCallbacks>>
+    solver: Option<BatSatSolver<BasicCallbacks>>,
 }
 
 fn measure_execution<T, F: FnOnce() -> T>(f: F) -> (u64, T) {
@@ -77,25 +85,23 @@ impl CNFSolverMeasurement for ScrewSat {
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
         if let Some(sat) = &mut self.solver {
-            let (time_usecs, status) = measure_execution(|| {
-                match sat.solve(None) {
-                    screwsat::solver::Status::Sat => Status::SAT,
-                    screwsat::solver::Status::Unsat => Status::UNSAT,
-                    screwsat::solver::Status::Indeterminate => panic!("solver stopped searching"),
-                }
+            let (time_usecs, status) = measure_execution(|| match sat.solve(None) {
+                screwsat::solver::Status::Sat => Status::SAT,
+                screwsat::solver::Status::Unsat => Status::UNSAT,
+                screwsat::solver::Status::Indeterminate => panic!("solver stopped searching"),
             });
             Ok((time_usecs, status))
         } else {
             panic!("solver has not been setup")
         }
     }
-    
+
     fn solver_name() -> String {
         "ScrewSat".to_string()
     }
 }
 
-impl <'a> CNFSolverMeasurement for VariSat<'a> {
+impl<'a> CNFSolverMeasurement for VariSat<'a> {
     fn measured_setup(&mut self, path: &Path) -> std::io::Result<u64> {
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
@@ -108,19 +114,17 @@ impl <'a> CNFSolverMeasurement for VariSat<'a> {
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
-        if let Some(sat) = &mut self.solver {            
-            let (time_usecs, status) = measure_execution(|| {
-                match sat.solve().unwrap() {
-                    true => Status::SAT,
-                    false => Status::UNSAT,
-                }
+        if let Some(sat) = &mut self.solver {
+            let (time_usecs, status) = measure_execution(|| match sat.solve().unwrap() {
+                true => Status::SAT,
+                false => Status::UNSAT,
             });
             Ok((time_usecs, status))
         } else {
             panic!("solver has not been setup")
         }
     }
-    
+
     fn solver_name() -> String {
         "VariSat".to_string()
     }
@@ -135,12 +139,10 @@ impl CNFSolverMeasurement for Splr {
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
-        if let Some(sat) = &mut self.solver {            
-            let (time_usecs, status) = measure_execution(|| {
-                match sat.solve().unwrap() {
-                    splr::Certificate::SAT(_) => Status::SAT,
-                    splr::Certificate::UNSAT => Status::UNSAT,
-                }
+        if let Some(sat) = &mut self.solver {
+            let (time_usecs, status) = measure_execution(|| match sat.solve().unwrap() {
+                splr::Certificate::SAT(_) => Status::SAT,
+                splr::Certificate::UNSAT => Status::UNSAT,
             });
             Ok((time_usecs, status))
         } else {
@@ -150,7 +152,7 @@ impl CNFSolverMeasurement for Splr {
 
     fn solver_name() -> String {
         "Splr".to_string()
-    }    
+    }
 }
 
 impl CNFSolverMeasurement for BatSat {
@@ -166,7 +168,7 @@ impl CNFSolverMeasurement for BatSat {
     }
 
     fn measured_solve(&mut self) -> std::io::Result<(u64, Status)> {
-        if let Some(sat) = &mut self.solver {            
+        if let Some(sat) = &mut self.solver {
             let (time_usecs, status) = measure_execution(|| {
                 let res = sat.solve_limited(&[]);
                 if res == lbool::TRUE {
@@ -188,7 +190,11 @@ impl CNFSolverMeasurement for BatSat {
     }
 }
 
-fn for_each_dimacs_file<C: CNFSolverMeasurement>(path: &str, solver: &mut C, results: &mut BTreeMap<OsString, Vec<MeasurementResult>>) -> std::io::Result<()>  {
+fn for_each_dimacs_file<C: CNFSolverMeasurement>(
+    path: &str,
+    solver: &mut C,
+    results: &mut BTreeMap<OsString, Vec<MeasurementResult>>,
+) -> std::io::Result<()> {
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         let path = entry.path();
@@ -196,9 +202,12 @@ fn for_each_dimacs_file<C: CNFSolverMeasurement>(path: &str, solver: &mut C, res
 
         // Check if the file has a .dimacs extension
         if let Some(extension) = path.extension() {
-            if extension == "dimacs"{
+            if extension == "dimacs" {
                 // Get the file name without the extension
-                let mut res = MeasurementResult { solver_name: C::solver_name(), ..Default::default() };                
+                let mut res = MeasurementResult {
+                    solver_name: C::solver_name(),
+                    ..Default::default()
+                };
                 res.setup_time = C::measured_setup(solver, path.as_path()).unwrap();
                 (res.solve_time, res.status) = C::measured_solve(solver).unwrap();
 
@@ -238,7 +247,11 @@ fn output_results(results: &BTreeMap<OsString, Vec<MeasurementResult>>) -> std::
 }
 
 fn main() -> std::io::Result<()> {
-    assert!(Path::new(FILE_PATH).is_dir(), "Directory not found: {}", FILE_PATH);
+    assert!(
+        Path::new(FILE_PATH).is_dir(),
+        "Directory not found: {}",
+        FILE_PATH
+    );
 
     let mut results: BTreeMap<OsString, Vec<MeasurementResult>> = Default::default();
 
