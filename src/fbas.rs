@@ -103,6 +103,13 @@ impl Fbas {
         idx
     }
 
+    pub(crate) fn get_validator(&self, ni: &NodeIndex) -> Option<&String> {
+        match self.graph.node_weight(*ni) {
+            Some(Vertex::Validator(v)) => Some(v),
+            _ => None,
+        }
+    }
+
     fn from_quorum_set_map(qsm: QuorumSetMap) -> Result<Self, Box<dyn std::error::Error>> {
         let mut fbas = Fbas::default();
         let mut known_validators = BTreeMap::new();
