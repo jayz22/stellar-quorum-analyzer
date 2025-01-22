@@ -1,8 +1,9 @@
 use crate::Fbas;
 use batsat::{
     callbacks::{AsyncInterrupt, AsyncInterruptHandle},
+    interface::SolveResult,
     intmap::AsIndex,
-    lbool, Lit, Solver, SolverInterface, Var,
+    lbool, theory, Lit, Solver, SolverInterface, Var,
 };
 use itertools::Itertools;
 use petgraph::{csr::IndexType, graph::NodeIndex};
@@ -59,23 +60,28 @@ impl FbasLitsWrapper {
 }
 
 pub struct FbasAnalyzer {
+    fbas: Fbas,
     solver: Solver<AsyncInterrupt>,
     interrupt_handle: AsyncInterruptHandle,
+    potential_split: Option<(Vec<NodeIndex>, Vec<NodeIndex>)>,
 }
 
 impl FbasAnalyzer {
-    pub fn new(fbas: &Fbas) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(fbas: Fbas) -> Result<Self, Box<dyn std::error::Error>> {
         let cb = AsyncInterrupt::default();
         let interrupt_handle = cb.get_handle();
         let mut analyzer = Self {
+            fbas,
             solver: Solver::new(Default::default(), cb),
             interrupt_handle,
+            potential_split: None,
         };
-        analyzer.construct_formula(fbas)?;
+        analyzer.construct_formula()?;
         Ok(analyzer)
     }
 
-    fn construct_formula(&mut self, fbas: &Fbas) -> Result<(), Box<dyn std::error::Error>> {
+    fn construct_formula(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let fbas = &self.fbas;
         let fbas_lits = FbasLitsWrapper::new(fbas.graph.node_count());
 
         // for each vertice in the graph, we add a variable representing it belonging to quorum A and quorum B
@@ -142,8 +148,52 @@ impl FbasAnalyzer {
     }
 
     pub fn solve(&mut self) -> bool {
-        let status = self.solver.solve_limited(&[]);
-        status == lbool::TRUE
+        let mut th = theory::EmptyTheory::new();
+        let result = self.solver.solve_limited_th_full(&mut th, &[]);
+        match result {
+            SolveResult::Sat(model) => {
+                let fbas_lits = FbasLitsWrapper::new(self.fbas.graph.node_count());
+                let mut quorum_a = vec![];
+                let mut quorum_b = vec![];
+                self.fbas.validators.iter().for_each(|ni| {
+                    let la = fbas_lits.in_quorum_a(ni);
+                    if model.value_lit(la) == lbool::TRUE {
+                        quorum_a.push(*ni);
+                    }
+                    let lb = fbas_lits.in_quorum_b(ni);
+                    if model.value_lit(lb) == lbool::TRUE {
+                        quorum_b.push(*ni);
+                    }
+                });
+                self.potential_split = Some((quorum_a, quorum_b));
+                true
+            }
+            SolveResult::Unsat(_) => {
+                println!("No solution exists");
+                false
+            }
+            SolveResult::Unknown(_) => {
+                println!("Solver could not determine satisfiability");
+                false
+            }
+        }
+    }
+
+    pub fn get_potential_split(&self) -> (Vec<String>, Vec<String>) {
+        match &self.potential_split {
+            Some((quorum_a, quorum_b)) => {
+                let qa_strings = quorum_a
+                    .iter()
+                    .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
+                    .collect();
+                let qb_strings = quorum_b
+                    .iter()
+                    .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
+                    .collect();
+                (qa_strings, qb_strings)
+            }
+            None => (vec![], vec![]),
+        }
     }
 
     pub fn interrupt(&self) {
@@ -166,7 +216,7 @@ mod test {
                     let case = path.file_stem().unwrap().to_os_string();
                     test_cases.push(case);
                     let fbas = Fbas::from_json(path.as_os_str().to_str().unwrap()).unwrap();
-                    let mut solver = FbasAnalyzer::new(&fbas).unwrap();
+                    let mut solver = FbasAnalyzer::new(fbas).unwrap();
                     let res = solver.solve();
                     println!("{res:?}");
                 }
@@ -199,7 +249,7 @@ mod test {
             dimacs_file.push(".dimacs");
 
             let fbas = Fbas::from_json(json_file.as_os_str().to_str().unwrap()).unwrap();
-            let mut solver = FbasAnalyzer::new(&fbas).unwrap();
+            let mut solver = FbasAnalyzer::new(fbas).unwrap();
             let res = solver.solve();
             {
                 // Open and read the file line by line
@@ -217,6 +267,8 @@ mod test {
                             break;
                         } else if line.contains("SATISFIABLE") {
                             expected = true;
+                            let (qa, qb) = solver.get_potential_split();
+                            println!("quorum a: {:?}, quorum b: {:?}", qa, qb);
                             break;
                         }
                     }
