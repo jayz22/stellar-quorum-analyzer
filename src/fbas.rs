@@ -195,15 +195,17 @@ impl Fbas {
 
         for (node_buf, qset_buf) in nodes.zip(quorum_set) {
             let node = NodeId::from_xdr(node_buf, Limits::none())?;
-            let qset = ScpQuorumSet::from_xdr(qset_buf, Limits::none())?;
-
             let node_str = match &node.0 {
                 PublicKey::PublicKeyTypeEd25519(key) => {
                     stellar_strkey::ed25519::PublicKey(key.0).to_string()
                 }
             };
-
-            quorum_set_map.insert(node_str, Rc::new(qset.into()));
+            if !qset_buf.as_ref().is_empty() {
+                let qset = ScpQuorumSet::from_xdr(qset_buf, Limits::none())?;
+                quorum_set_map.insert(node_str, Rc::new(qset.into()));
+            } else {
+                eprintln!("Validator {} is unknown", node_str);
+            }
         }
 
         Self::from_quorum_set_map(quorum_set_map)

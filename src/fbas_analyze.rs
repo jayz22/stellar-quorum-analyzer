@@ -1,9 +1,7 @@
 use crate::Fbas;
 use batsat::{
-    callbacks::{AsyncInterrupt, AsyncInterruptHandle},
-    interface::SolveResult,
-    intmap::AsIndex,
-    lbool, theory, Lit, Solver, SolverInterface, Var,
+    interface::SolveResult, intmap::AsIndex, lbool, theory, Callbacks, Lit, Solver,
+    SolverInterface, Var,
 };
 use itertools::Itertools;
 use petgraph::{csr::IndexType, graph::NodeIndex};
@@ -59,21 +57,18 @@ impl FbasLitsWrapper {
     }
 }
 
-pub struct FbasAnalyzer {
+#[derive(Default)]
+pub struct FbasAnalyzer<Cb: Callbacks> {
     fbas: Fbas,
-    solver: Solver<AsyncInterrupt>,
-    interrupt_handle: AsyncInterruptHandle,
+    solver: Solver<Cb>,
     potential_split: Option<(Vec<NodeIndex>, Vec<NodeIndex>)>,
 }
 
-impl FbasAnalyzer {
-    pub fn new(fbas: Fbas) -> Result<Self, Box<dyn std::error::Error>> {
-        let cb = AsyncInterrupt::default();
-        let interrupt_handle = cb.get_handle();
+impl<Cb: Callbacks> FbasAnalyzer<Cb> {
+    pub fn new(fbas: Fbas, cb: Cb) -> Result<Self, Box<dyn std::error::Error>> {
         let mut analyzer = Self {
             fbas,
             solver: Solver::new(Default::default(), cb),
-            interrupt_handle,
             potential_split: None,
         };
         analyzer.construct_formula()?;
@@ -195,15 +190,12 @@ impl FbasAnalyzer {
             None => (vec![], vec![]),
         }
     }
-
-    pub fn interrupt(&self) {
-        self.interrupt_handle.interrupt_async();
-    }
 }
 
 #[cfg(test)]
 mod test {
     use crate::{Fbas, FbasAnalyzer};
+    use batsat::callbacks::Basic;
     use std::{io::BufRead, str::FromStr};
 
     #[test]
@@ -216,7 +208,7 @@ mod test {
                     let case = path.file_stem().unwrap().to_os_string();
                     test_cases.push(case);
                     let fbas = Fbas::from_json(path.as_os_str().to_str().unwrap()).unwrap();
-                    let mut solver = FbasAnalyzer::new(fbas).unwrap();
+                    let mut solver = FbasAnalyzer::new(fbas, Basic::default()).unwrap();
                     let res = solver.solve();
                     println!("{res:?}");
                 }
@@ -249,7 +241,7 @@ mod test {
             dimacs_file.push(".dimacs");
 
             let fbas = Fbas::from_json(json_file.as_os_str().to_str().unwrap()).unwrap();
-            let mut solver = FbasAnalyzer::new(fbas).unwrap();
+            let mut solver = FbasAnalyzer::new(fbas, Basic::default()).unwrap();
             let res = solver.solve();
             {
                 // Open and read the file line by line
