@@ -5,4 +5,4 @@ pub use fbas::*;
 pub mod fbas_analyze;
 pub use fbas_analyze::*;
 
-pub use batsat::callbacks::{AsyncInterrupt, AsyncInterruptHandle};
+pub use batsat::callbacks::{AsyncInterrupt, AsyncInterruptHandle, Callbacks};

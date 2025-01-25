@@ -61,7 +61,39 @@ impl FbasLitsWrapper {
 pub struct FbasAnalyzer<Cb: Callbacks> {
     fbas: Fbas,
     solver: Solver<Cb>,
-    potential_split: Option<(Vec<NodeIndex>, Vec<NodeIndex>)>,
+    status: SolveStatus,
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub enum SolveStatus {
+    SAT((Vec<NodeIndex>, Vec<NodeIndex>)),
+    UNSAT,
+    #[default]
+    UNKNOWN,
+}
+
+impl std::fmt::Debug for SolveStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SolveStatus::SAT((quorum_a, quorum_b)) => {
+                write!(f, "SAT(quorum_a: {:?}, quorum_b: {:?})", quorum_a, quorum_b)
+            }
+            SolveStatus::UNSAT => write!(f, "UNSAT"),
+            SolveStatus::UNKNOWN => write!(f, "UNKNOWN"),
+        }
+    }
+}
+
+impl std::fmt::Display for SolveStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SolveStatus::SAT((quorum_a, quorum_b)) => {
+                write!(f, "SAT - Split found:\nQuorum A: {:#?}\nQuorum B: {:#?}", quorum_a, quorum_b)
+            }
+            SolveStatus::UNSAT => write!(f, "UNSAT - No split exists"),
+            SolveStatus::UNKNOWN => write!(f, "UNKNOWN - Solver status unknown"),
+        }
+    }
 }
 
 impl<Cb: Callbacks> FbasAnalyzer<Cb> {
@@ -69,7 +101,7 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         let mut analyzer = Self {
             fbas,
             solver: Solver::new(Default::default(), cb),
-            potential_split: None,
+            status: SolveStatus::UNKNOWN,
         };
         analyzer.construct_formula()?;
         Ok(analyzer)
@@ -142,10 +174,13 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         Ok(())
     }
 
-    pub fn solve(&mut self) -> bool {
+    pub fn solve(&mut self) -> SolveStatus {
+
+        println!("callback stop condition: {}", self.solver.cb().stop());
+
         let mut th = theory::EmptyTheory::new();
         let result = self.solver.solve_limited_th_full(&mut th, &[]);
-        match result {
+        self.status = match result {
             SolveResult::Sat(model) => {
                 let fbas_lits = FbasLitsWrapper::new(self.fbas.graph.node_count());
                 let mut quorum_a = vec![];
@@ -160,43 +195,58 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
                         quorum_b.push(*ni);
                     }
                 });
-                self.potential_split = Some((quorum_a, quorum_b));
-                true
+                SolveStatus::SAT((quorum_a, quorum_b))
             }
             SolveResult::Unsat(_) => {
-                println!("No solution exists");
-                false
+                SolveStatus::UNSAT
             }
             SolveResult::Unknown(_) => {
-                println!("Solver could not determine satisfiability");
-                false
+                SolveStatus::UNKNOWN
             }
-        }
+        };
+        self.status.clone()
     }
 
     pub fn get_potential_split(&self) -> (Vec<String>, Vec<String>) {
-        match &self.potential_split {
-            Some((quorum_a, quorum_b)) => {
-                let qa_strings = quorum_a
-                    .iter()
-                    .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
-                    .collect();
-                let qb_strings = quorum_b
-                    .iter()
-                    .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
-                    .collect();
-                (qa_strings, qb_strings)
-            }
-            None => (vec![], vec![]),
+        if let SolveStatus::SAT((quorum_a, quorum_b)) = &self.status {
+            let qa_strings = quorum_a
+                .iter()
+                .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
+                .collect();
+            let qb_strings = quorum_b
+                .iter()
+                .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
+                .collect();
+            (qa_strings, qb_strings)
+        } else {
+            (vec![], vec![])
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{Fbas, FbasAnalyzer};
-    use batsat::callbacks::Basic;
+    use crate::{Fbas, FbasAnalyzer, SolveStatus};
+    use batsat::callbacks::{AsyncInterrupt, Basic};
     use std::{io::BufRead, str::FromStr};
+
+    #[test]
+    fn test_solver_interrupt() -> Result<(), Box<dyn std::error::Error>> {
+        let json_file = std::path::PathBuf::from("./tests/test_data/random/almost_symmetric_network_16_orgs_delete_prob_factor_1.json");
+        let fbas = Fbas::from_json(json_file.as_os_str().to_str().unwrap()).unwrap();
+        let cb = AsyncInterrupt::default();
+        let handle = cb.get_handle();
+        let mut solver = FbasAnalyzer::new(fbas, cb)?;
+
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_micros(100));
+            handle.interrupt_async();
+        });
+
+        let res = solver.solve();
+        assert_eq!(res, SolveStatus::UNKNOWN);
+        Ok(())
+    }
 
     #[test]
     fn test() -> std::io::Result<()> {
@@ -210,7 +260,7 @@ mod test {
                     let fbas = Fbas::from_json(path.as_os_str().to_str().unwrap()).unwrap();
                     let mut solver = FbasAnalyzer::new(fbas, Basic::default()).unwrap();
                     let res = solver.solve();
-                    println!("{res:?}");
+                    println!("{:?}", res);
                 }
             }
         }
@@ -265,7 +315,8 @@ mod test {
                         }
                     }
                 }
-                assert_eq!(res, expected);
+                let is_sat = matches!(res, SolveStatus::SAT(_));
+                assert_eq!(is_sat, expected);
             }
         }
         Ok(())

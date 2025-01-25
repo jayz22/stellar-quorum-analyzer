@@ -23,8 +23,10 @@ unsafe impl GlobalAlloc for LimitedAllocator {
     }
 }
 
+const MEMORY_LIMIT: usize = 2 * 1024 * 1024 * 1024;
+
 #[global_allocator]
 static ALLOCATOR: LimitedAllocator = LimitedAllocator {
-    limit: 1024 * 1024 * 1024,
+    limit: MEMORY_LIMIT,
     allocated: AtomicUsize::new(0),
-}; // 1GB
+};
