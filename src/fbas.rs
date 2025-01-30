@@ -57,14 +57,22 @@ impl Vertex {
 
 #[derive(Debug)]
 pub enum FbasError {
-    ParseError,
+    ParseError(String),
+    MaxDepthExceeded,
+    XdrDecodingError(String),
+    InternalError(String),
 }
 
 impl std::error::Error for FbasError {}
 
 impl std::fmt::Display for FbasError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <FbasError as Debug>::fmt(&self, f)
+        match self {
+            FbasError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            FbasError::MaxDepthExceeded => write!(f, "Maximum quorum set depth exceeded"),
+            FbasError::XdrDecodingError(msg) => write!(f, "XDR decoding error: {}", msg),
+            FbasError::InternalError(msg) => write!(f, "Internal error (likely a bug): {}", msg),
+        }
     }
 }
 
@@ -103,14 +111,17 @@ impl Fbas {
         idx
     }
 
-    pub(crate) fn get_validator(&self, ni: &NodeIndex) -> Option<&String> {
+    pub(crate) fn try_get_validator_string(&self, ni: &NodeIndex) -> Result<String, FbasError> {
         match self.graph.node_weight(*ni) {
-            Some(Vertex::Validator(v)) => Some(v),
-            _ => None,
+            Some(Vertex::Validator(v)) => Ok(v.clone()),
+            _ => Err(FbasError::InternalError(format!(
+                "Node index {} is not a validator",
+                ni.index()
+            ))),
         }
     }
 
-    fn from_quorum_set_map(qsm: QuorumSetMap) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_quorum_set_map(qsm: QuorumSetMap) -> Result<Self, FbasError> {
         let mut fbas = Fbas::default();
         let mut known_validators = BTreeMap::new();
         let mut known_qsets = BTreeMap::new();
@@ -123,7 +134,9 @@ impl Fbas {
 
         // Second pass: process quorum sets and create connections
         for (node_str, qset) in qsm.iter() {
-            let v_idx = known_validators.get(node_str).unwrap();
+            let v_idx = known_validators
+                .get(node_str)
+                .ok_or_else(|| FbasError::InternalError(format!("key {} not found", node_str)))?;
             let q_idx =
                 fbas.process_scp_quorum_set(qset, 0, &known_validators, &mut known_qsets)?;
             let _ = fbas.graph.add_edge(*v_idx, q_idx, ());
@@ -138,9 +151,9 @@ impl Fbas {
         curr_depth: u32,
         known_validators: &BTreeMap<&String, NodeIndex>,
         known_qsets: &mut BTreeMap<Qset, NodeIndex>,
-    ) -> Result<NodeIndex, Box<dyn std::error::Error>> {
+    ) -> Result<NodeIndex, FbasError> {
         if curr_depth == QUORUM_SET_MAX_DEPTH {
-            return Err("qset exceeds max depth".into());
+            return Err(FbasError::MaxDepthExceeded);
         }
 
         let mut new_qset = Qset::default();
@@ -189,19 +202,21 @@ impl Fbas {
     pub fn from_quorum_set_map_buf<T: AsRef<[u8]>, I: ExactSizeIterator<Item = T>>(
         nodes: I,
         quorum_set: I,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, FbasError> {
         assert_eq!(nodes.len(), quorum_set.len());
         let mut quorum_set_map = QuorumSetMap::new();
 
         for (node_buf, qset_buf) in nodes.zip(quorum_set) {
-            let node = NodeId::from_xdr(node_buf, Limits::none())?;
+            let node = NodeId::from_xdr(node_buf, Limits::none())
+                .map_err(|e| FbasError::XdrDecodingError(e.to_string()))?;
             let node_str = match &node.0 {
                 PublicKey::PublicKeyTypeEd25519(key) => {
                     stellar_strkey::ed25519::PublicKey(key.0).to_string()
                 }
             };
             if !qset_buf.as_ref().is_empty() {
-                let qset = ScpQuorumSet::from_xdr(qset_buf, Limits::none())?;
+                let qset = ScpQuorumSet::from_xdr(qset_buf, Limits::none())
+                    .map_err(|e| FbasError::XdrDecodingError(e.to_string()))?;
                 quorum_set_map.insert(node_str, Rc::new(qset.into()));
             } else {
                 eprintln!("Validator {} is unknown", node_str);
@@ -210,9 +225,9 @@ impl Fbas {
 
         Self::from_quorum_set_map(quorum_set_map)
     }
-
-    #[cfg(feature = "json")]
-    pub fn from_json_path(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    
+    #[cfg(any(feature = "json", test))]
+    pub fn from_json_path(path: &str) -> Result<Self, FbasError> {
         let quorum_set_map = crate::json_parser::quorum_set_map_from_json(path)?;
         Self::from_quorum_set_map(quorum_set_map)
     }

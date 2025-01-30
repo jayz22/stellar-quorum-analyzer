@@ -1,41 +1,44 @@
-use crate::fbas::{InternalScpQuorumSet, QuorumSetMap};
+use crate::fbas::{FbasError, InternalScpQuorumSet, QuorumSetMap};
 use json::{object::Object, JsonValue};
 use std::{fs::File, io::Read, rc::Rc};
 
-pub(crate) fn quorum_set_map_from_json(
-    path: &str,
-) -> Result<QuorumSetMap, Box<dyn std::error::Error>> {
-    let mut file = File::open(path)?;
+pub(crate) fn quorum_set_map_from_json(path: &str) -> Result<QuorumSetMap, FbasError> {
+    let mut file = File::open(path).map_err(|e| FbasError::ParseError(e.to_string()))?;
     let mut data = String::new();
-    file.read_to_string(&mut data)?;
-    let json_data = json::parse(&data)?;
+    file.read_to_string(&mut data)
+        .map_err(|e| FbasError::ParseError(e.to_string()))?;
+    let json_data = json::parse(&data).map_err(|e| FbasError::ParseError(e.to_string()))?;
 
     match json_data {
         JsonValue::Object(root) => try_parse_quorum_set_map_from_json_regular(root),
         JsonValue::Array(nodes) => try_parse_quorum_set_map_from_stellarbeats_json(nodes),
-        _ => Err("root is neither an object nor an array".into()),
+        _ => Err(FbasError::ParseError(
+            "root is neither an object nor an array".to_string(),
+        )),
     }
 }
 
-fn try_parse_quorum_set_map_from_json_regular(
-    root: Object,
-) -> Result<QuorumSetMap, Box<dyn std::error::Error>> {
+fn try_parse_quorum_set_map_from_json_regular(root: Object) -> Result<QuorumSetMap, FbasError> {
     let nodes = match root.get("nodes") {
         Some(JsonValue::Array(nodes)) => nodes,
-        _ => return Err("nodes field missing or not an array".into()),
+        _ => {
+            return Err(FbasError::ParseError(
+                "nodes field missing or not an array".into(),
+            ))
+        }
     };
 
     let mut quorum_map = QuorumSetMap::new();
     for node in nodes {
         let node = match node {
             JsonValue::Object(n) => n,
-            _ => return Err("node is not an object".into()),
+            _ => return Err(FbasError::ParseError("node is not an object".into())),
         };
 
         let public_key = node
             .get("node")
             .and_then(|n| n.as_str())
-            .ok_or("node field missing or not a string")?
+            .ok_or_else(|| FbasError::ParseError("node field missing or not a string".into()))?
             .to_string();
 
         let qset = parse_internal_quorum_set(&node["qset"])?;
@@ -45,16 +48,18 @@ fn try_parse_quorum_set_map_from_json_regular(
     Ok(quorum_map)
 }
 
-fn parse_internal_quorum_set(
-    json_qset: &JsonValue,
-) -> Result<InternalScpQuorumSet, Box<dyn std::error::Error>> {
+fn parse_internal_quorum_set(json_qset: &JsonValue) -> Result<InternalScpQuorumSet, FbasError> {
     let threshold = json_qset["t"]
         .as_u32()
-        .ok_or("threshold field missing or not a number")?;
+        .ok_or_else(|| FbasError::ParseError("threshold field missing or not a number".into()))?;
 
     let v = match &json_qset["v"] {
         JsonValue::Array(v) => v,
-        _ => return Err("v field missing or not an array".into()),
+        _ => {
+            return Err(FbasError::ParseError(
+                "v field missing or not an array".into(),
+            ))
+        }
     };
 
     let mut validators = vec![];
@@ -69,10 +74,10 @@ fn parse_internal_quorum_set(
                 inner_sets.push(parse_internal_quorum_set(item)?);
             }
             _ => {
-                return Err(
+                return Err(FbasError::ParseError(
                     "validator entry must be either a string (PublicKey) or an object (QuorumSet)"
                         .into(),
-                )
+                ))
             }
         }
     }
@@ -86,10 +91,10 @@ fn parse_internal_quorum_set(
 
 fn parse_stellarbeats_internal_quorum_set(
     json_qset: &JsonValue,
-) -> Result<InternalScpQuorumSet, Box<dyn std::error::Error>> {
+) -> Result<InternalScpQuorumSet, FbasError> {
     let threshold = json_qset["threshold"]
         .as_u32()
-        .ok_or("threshold field missing or not a number")?;
+        .ok_or_else(|| FbasError::ParseError("threshold field missing or not a number".into()))?;
 
     let mut validators = vec![];
     let mut inner_sets = vec![];
@@ -99,11 +104,19 @@ fn parse_stellarbeats_internal_quorum_set(
             for validator in validator_arr {
                 match validator.as_str() {
                     Some(validator_str) => validators.push(validator_str.to_string()),
-                    None => return Err("validator entry must be a string".into()),
+                    None => {
+                        return Err(FbasError::ParseError(
+                            "validator entry must be a string".into(),
+                        ))
+                    }
                 }
             }
         }
-        _ => return Err("validators field missing or not an array".into()),
+        _ => {
+            return Err(FbasError::ParseError(
+                "validators field missing or not an array".into(),
+            ))
+        }
     }
 
     match &json_qset["innerQuorumSets"] {
@@ -112,7 +125,11 @@ fn parse_stellarbeats_internal_quorum_set(
                 inner_sets.push(parse_stellarbeats_internal_quorum_set(inner_qset)?);
             }
         }
-        _ => return Err("innerQuorumSets field missing or not an array".into()),
+        _ => {
+            return Err(FbasError::ParseError(
+                "innerQuorumSets field missing or not an array".into(),
+            ))
+        }
     }
 
     Ok(InternalScpQuorumSet {
@@ -124,18 +141,18 @@ fn parse_stellarbeats_internal_quorum_set(
 
 fn try_parse_quorum_set_map_from_stellarbeats_json(
     nodes: Vec<JsonValue>,
-) -> Result<QuorumSetMap, Box<dyn std::error::Error>> {
+) -> Result<QuorumSetMap, FbasError> {
     let mut quorum_map = QuorumSetMap::new();
     for node in nodes {
         let node = match node {
             JsonValue::Object(n) => n,
-            _ => return Err("node is not an object".into()),
+            _ => return Err(FbasError::ParseError("node is not an object".into())),
         };
 
         let public_key = node
             .get("publicKey")
             .and_then(|n| n.as_str())
-            .ok_or("publicKey field missing or not a string")?
+            .ok_or_else(|| FbasError::ParseError("publicKey field missing or not a string".into()))?
             .to_string();
 
         let qset = parse_stellarbeats_internal_quorum_set(&node["quorumSet"])?;

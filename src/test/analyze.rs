@@ -85,7 +85,7 @@ fn test_random_data() -> std::io::Result<()> {
                         break;
                     } else if line.contains("SATISFIABLE") {
                         expected = true;
-                        let (qa, qb) = solver.get_potential_split();
+                        let (qa, qb) = solver.get_potential_split().unwrap();
                         println!("quorum a: {:?}, quorum b: {:?}", qa, qb);
                         break;
                     }

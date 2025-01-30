@@ -1,4 +1,4 @@
-use crate::Fbas;
+use crate::fbas::{Fbas, FbasError};
 use batsat::{
     interface::SolveResult, intmap::AsIndex, lbool, theory, Callbacks, Lit, Solver,
     SolverInterface, Var,
@@ -86,17 +86,7 @@ impl std::fmt::Debug for SolveStatus {
 
 impl std::fmt::Display for SolveStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SolveStatus::SAT((quorum_a, quorum_b)) => {
-                write!(
-                    f,
-                    "SAT - Split found:\nQuorum A: {:#?}\nQuorum B: {:#?}",
-                    quorum_a, quorum_b
-                )
-            }
-            SolveStatus::UNSAT => write!(f, "UNSAT - No split exists"),
-            SolveStatus::UNKNOWN => write!(f, "UNKNOWN - Solver status unknown"),
-        }
+        <Self as std::fmt::Debug>::fmt(&self, f)
     }
 }
 
@@ -105,18 +95,18 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         nodes: I,
         quorum_set: I,
         cb: Cb,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, FbasError> {
         let fbas = Fbas::from_quorum_set_map_buf(nodes, quorum_set)?;
         Self::from_fbas(fbas, cb)
     }
 
-    #[cfg(feature = "json")]
-    pub fn from_json_path(path: &str, cb: Cb) -> Result<Self, Box<dyn std::error::Error>> {
+    #[cfg(any(feature = "json", test))]
+    pub fn from_json_path(path: &str, cb: Cb) -> Result<Self, FbasError> {
         let fbas = Fbas::from_json_path(path)?;
         Self::from_fbas(fbas, cb)
     }
 
-    pub(crate) fn from_fbas(fbas: Fbas, cb: Cb) -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) fn from_fbas(fbas: Fbas, cb: Cb) -> Result<Self, FbasError> {
         let mut analyzer = Self {
             fbas,
             solver: Solver::new(Default::default(), cb),
@@ -126,7 +116,7 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         Ok(analyzer)
     }
 
-    fn construct_formula(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn construct_formula(&mut self) -> Result<(), FbasError> {
         let fbas = &self.fbas;
         let fbas_lits = FbasLitsWrapper::new(fbas.graph.node_count());
 
@@ -158,41 +148,45 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         });
 
         // formula 3: qset relation for each vertice must be satisfied
-        let mut add_clauses_for_quorum_relations = |in_quorum: &dyn Fn(&NodeIndex) -> Lit| {
-            fbas.graph.node_indices().for_each(|ni| {
-                let aq_i = in_quorum(&ni);
-                let nd = fbas.graph.node_weight(ni).unwrap();
-                let threshold = nd.get_threshold();
-                let neighbors = fbas.graph.neighbors(ni);
-                let qset = neighbors.into_iter().combinations(threshold as usize);
+        let mut add_clauses_for_quorum_relations =
+            |in_quorum: &dyn Fn(&NodeIndex) -> Lit| -> Result<(), FbasError> {
+                fbas.graph.node_indices().try_for_each(|ni| {
+                    let aq_i = in_quorum(&ni);
+                    let nd = fbas.graph.node_weight(ni).ok_or_else(|| {
+                        FbasError::InternalError(format!("Node index {} not found", ni.index()))
+                    })?;
+                    let threshold = nd.get_threshold();
+                    let neighbors = fbas.graph.neighbors(ni);
+                    let qset = neighbors.into_iter().combinations(threshold as usize);
 
-                let mut third_term = vec![];
-                third_term.push(!aq_i);
-                for (_j, q_slice) in qset.enumerate() {
-                    // create a new proposition as per Tseitin transformation
-                    let xi_j = fbas_lits.new_proposition(&mut self.solver);
+                    let mut third_term = vec![];
+                    third_term.push(!aq_i);
+                    for (_j, q_slice) in qset.enumerate() {
+                        // create a new proposition as per Tseitin transformation
+                        let xi_j = fbas_lits.new_proposition(&mut self.solver);
 
-                    // this is the second part in the qsat_i^{A} equation
-                    let mut neg_pi_j = vec![];
-                    neg_pi_j.push(!aq_i);
-                    neg_pi_j.push(xi_j);
-                    for (_k, elem) in q_slice.iter().enumerate() {
-                        // get lit for elem
-                        let elit = in_quorum(elem);
-                        neg_pi_j.push(!elit);
-                        // this is the first part of the equation
-                        self.solver.add_clause_reuse(&mut vec![!aq_i, !xi_j, elit]);
+                        // this is the second part in the qsat_i^{A} equation
+                        let mut neg_pi_j = vec![];
+                        neg_pi_j.push(!aq_i);
+                        neg_pi_j.push(xi_j);
+                        for (_k, elem) in q_slice.iter().enumerate() {
+                            // get lit for elem
+                            let elit = in_quorum(elem);
+                            neg_pi_j.push(!elit);
+                            // this is the first part of the equation
+                            self.solver.add_clause_reuse(&mut vec![!aq_i, !xi_j, elit]);
+                        }
+                        self.solver.add_clause_reuse(&mut neg_pi_j);
+
+                        third_term.push(xi_j);
                     }
-                    self.solver.add_clause_reuse(&mut neg_pi_j);
+                    self.solver.add_clause_reuse(&mut third_term);
+                    Ok(())
+                })
+            };
 
-                    third_term.push(xi_j);
-                }
-                self.solver.add_clause_reuse(&mut third_term);
-            });
-        };
-
-        add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_a(ni));
-        add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_b(ni));
+        add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_a(ni))?;
+        add_clauses_for_quorum_relations(&|ni| fbas_lits.in_quorum_b(ni))?;
         Ok(())
     }
 
@@ -222,19 +216,20 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         self.status.clone()
     }
 
-    pub fn get_potential_split(&self) -> (Vec<String>, Vec<String>) {
-        if let SolveStatus::SAT((quorum_a, quorum_b)) = &self.status {
-            let qa_strings = quorum_a
-                .iter()
-                .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
-                .collect();
-            let qb_strings = quorum_b
-                .iter()
-                .map(|ni| self.fbas.get_validator(ni).unwrap().clone())
-                .collect();
-            (qa_strings, qb_strings)
-        } else {
-            (vec![], vec![])
+    pub fn get_potential_split(&self) -> Result<(Vec<String>, Vec<String>), FbasError> {
+        match &self.status {
+            SolveStatus::SAT((quorum_a, quorum_b)) => {
+                let qa_strings = quorum_a
+                    .iter()
+                    .map(|ni| self.fbas.try_get_validator_string(ni))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let qb_strings = quorum_b
+                    .iter()
+                    .map(|ni| self.fbas.try_get_validator_string(ni))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((qa_strings, qb_strings))
+            }
+            _ => Ok((vec![], vec![])),
         }
     }
 }
