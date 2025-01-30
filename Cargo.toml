@@ -1,19 +1,15 @@
 [package]
-name = "stellar-quorum-checker"
+name = "stellar-quorum-analyzer"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 petgraph = "0.6.5"
 stellar-xdr = "=22.0.0"
-json = "0.12.4"
+json = { version = "0.12.4", optional = true }
 itertools = "*"
 stellar-strkey = "0.0.11"
-
-[dependencies.batsat]
-version = "0.5.0"
-git = "https://github.com/c-cube/batsat.git"
-rev = "6cc3b2eb2d9585e6ee7743a414b816acf2a07056"
+batsat = "0.6.0"
 
 [dev-dependencies]
 varisat = "=0.2.2"
@@ -27,3 +23,7 @@ harness = false
 bench = true
 name = "solver_comparison"
 path = "benches/solver_comparison.rs"
+
+[features]
+default = []
+json = ["dep:json"]

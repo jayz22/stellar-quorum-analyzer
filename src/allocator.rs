@@ -23,6 +23,7 @@ unsafe impl GlobalAlloc for LimitedAllocator {
     }
 }
 
+ // limit internal memory allocation to 2 GiB
 const MEMORY_LIMIT: usize = 2 * 1024 * 1024 * 1024;
 
 #[global_allocator]

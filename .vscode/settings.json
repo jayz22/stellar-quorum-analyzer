@@ -8,4 +8,5 @@
     "rust-analyzer.inlayHints.closureCaptureHints.enable": true,
     "rust-analyzer.inlayHints.closureReturnTypeHints.enable": "always",
     "rust-analyzer.inlayHints.discriminantHints.enable": "always",
+    "githd.blameView.enabled": false
 }

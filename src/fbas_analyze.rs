@@ -88,7 +88,11 @@ impl std::fmt::Display for SolveStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SolveStatus::SAT((quorum_a, quorum_b)) => {
-                write!(f, "SAT - Split found:\nQuorum A: {:#?}\nQuorum B: {:#?}", quorum_a, quorum_b)
+                write!(
+                    f,
+                    "SAT - Split found:\nQuorum A: {:#?}\nQuorum B: {:#?}",
+                    quorum_a, quorum_b
+                )
             }
             SolveStatus::UNSAT => write!(f, "UNSAT - No split exists"),
             SolveStatus::UNKNOWN => write!(f, "UNKNOWN - Solver status unknown"),
@@ -97,7 +101,22 @@ impl std::fmt::Display for SolveStatus {
 }
 
 impl<Cb: Callbacks> FbasAnalyzer<Cb> {
-    pub fn new(fbas: Fbas, cb: Cb) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_quorum_set_map_buf<T: AsRef<[u8]>, I: ExactSizeIterator<Item = T>>(
+        nodes: I,
+        quorum_set: I,
+        cb: Cb,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let fbas = Fbas::from_quorum_set_map_buf(nodes, quorum_set)?;
+        Self::from_fbas(fbas, cb)
+    }
+
+    #[cfg(feature = "json")]
+    pub fn from_json_path(path: &str, cb: Cb) -> Result<Self, Box<dyn std::error::Error>> {
+        let fbas = Fbas::from_json_path(path)?;
+        Self::from_fbas(fbas, cb)
+    }
+
+    pub(crate) fn from_fbas(fbas: Fbas, cb: Cb) -> Result<Self, Box<dyn std::error::Error>> {
         let mut analyzer = Self {
             fbas,
             solver: Solver::new(Default::default(), cb),
@@ -111,14 +130,16 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         let fbas = &self.fbas;
         let fbas_lits = FbasLitsWrapper::new(fbas.graph.node_count());
 
-        // for each vertice in the graph, we add a variable representing it belonging to quorum A and quorum B
+        // for each vertice in the graph, we add a variable representing it
+        // belonging to quorum A and quorum B
         fbas.graph.node_indices().for_each(|_| {
             self.solver.new_var_default();
             self.solver.new_var_default();
         });
         debug_assert!(self.solver.num_vars() as usize == fbas.graph.node_count() * 2);
 
-        // formula 1: both quorums are non-empty -- at least one validator must exist in each quorum
+        // formula 1: both quorums are non-empty -- at least one validator must
+        // exist in each quorum
         let mut quorums_not_empty: (Vec<Lit>, Vec<Lit>) = fbas
             .validators
             .iter()
@@ -127,7 +148,8 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         self.solver.add_clause_reuse(&mut quorums_not_empty.0);
         self.solver.add_clause_reuse(&mut quorums_not_empty.1);
 
-        // formula 2: two quorums do not intersect -- no validator can appear in both quorums
+        // formula 2: two quorums do not intersect -- no validator can appear in
+        // both quorums
         fbas.validators.iter().for_each(|ni| {
             self.solver.add_clause_reuse(&mut vec![
                 !fbas_lits.in_quorum_a(ni),
@@ -175,9 +197,6 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
     }
 
     pub fn solve(&mut self) -> SolveStatus {
-
-        println!("callback stop condition: {}", self.solver.cb().stop());
-
         let mut th = theory::EmptyTheory::new();
         let result = self.solver.solve_limited_th_full(&mut th, &[]);
         self.status = match result {
@@ -197,12 +216,8 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
                 });
                 SolveStatus::SAT((quorum_a, quorum_b))
             }
-            SolveResult::Unsat(_) => {
-                SolveStatus::UNSAT
-            }
-            SolveResult::Unknown(_) => {
-                SolveStatus::UNKNOWN
-            }
+            SolveResult::Unsat(_) => SolveStatus::UNSAT,
+            SolveResult::Unknown(_) => SolveStatus::UNKNOWN,
         };
         self.status.clone()
     }
@@ -221,104 +236,5 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         } else {
             (vec![], vec![])
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::{Fbas, FbasAnalyzer, SolveStatus};
-    use batsat::callbacks::{AsyncInterrupt, Basic};
-    use std::{io::BufRead, str::FromStr};
-
-    #[test]
-    fn test_solver_interrupt() -> Result<(), Box<dyn std::error::Error>> {
-        let json_file = std::path::PathBuf::from("./tests/test_data/random/almost_symmetric_network_16_orgs_delete_prob_factor_1.json");
-        let fbas = Fbas::from_json(json_file.as_os_str().to_str().unwrap()).unwrap();
-        let cb = AsyncInterrupt::default();
-        let handle = cb.get_handle();
-        let mut solver = FbasAnalyzer::new(fbas, cb)?;
-
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_micros(100));
-            handle.interrupt_async();
-        });
-
-        let res = solver.solve();
-        assert_eq!(res, SolveStatus::UNKNOWN);
-        Ok(())
-    }
-
-    #[test]
-    fn test() -> std::io::Result<()> {
-        let mut test_cases = vec![];
-        for entry in std::fs::read_dir("./tests/test_data/")? {
-            let path = entry?.path();
-            if let Some(extension) = path.extension() {
-                if extension == "json" {
-                    let case = path.file_stem().unwrap().to_os_string();
-                    test_cases.push(case);
-                    let fbas = Fbas::from_json(path.as_os_str().to_str().unwrap()).unwrap();
-                    let mut solver = FbasAnalyzer::new(fbas, Basic::default()).unwrap();
-                    let res = solver.solve();
-                    println!("{:?}", res);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_random_data() -> std::io::Result<()> {
-        let mut test_cases = vec![];
-        let dir_path = std::ffi::OsString::from_str("./tests/test_data/random/").unwrap();
-        for entry in std::fs::read_dir("./tests/test_data/random/")? {
-            let path = entry?.path();
-            if let Some(extension) = path.extension() {
-                if extension == "dimacs" {
-                    let case = path.file_stem().unwrap().to_os_string();
-                    test_cases.push(case);
-                }
-            }
-        }
-
-        for case in test_cases {
-            let mut json_file = dir_path.clone();
-            json_file.push(case.clone());
-            json_file.push(".json");
-
-            let mut dimacs_file = dir_path.clone();
-            dimacs_file.push(case.clone());
-            dimacs_file.push(".dimacs");
-
-            let fbas = Fbas::from_json(json_file.as_os_str().to_str().unwrap()).unwrap();
-            let mut solver = FbasAnalyzer::new(fbas, Basic::default()).unwrap();
-            let res = solver.solve();
-            {
-                // Open and read the file line by line
-                let file =
-                    std::fs::File::open(dimacs_file).expect("Failed to open the DIMACS file");
-                let reader = std::io::BufReader::new(file);
-
-                // Look for the result comment line
-                let mut expected = false;
-                for line in reader.lines() {
-                    let line = line.expect("Failed to read line");
-                    if line.starts_with("c") {
-                        if line.contains("UNSATISFIABLE") {
-                            expected = false;
-                            break;
-                        } else if line.contains("SATISFIABLE") {
-                            expected = true;
-                            let (qa, qb) = solver.get_potential_split();
-                            println!("quorum a: {:?}, quorum b: {:?}", qa, qb);
-                            break;
-                        }
-                    }
-                }
-                let is_sat = matches!(res, SolveStatus::SAT(_));
-                assert_eq!(is_sat, expected);
-            }
-        }
-        Ok(())
     }
 }

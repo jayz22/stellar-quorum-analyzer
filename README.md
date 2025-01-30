@@ -1,2 +1,2 @@
-# stellar-quorum-checker
-Library for checking quorum intersection and other properties of the Stellar network
+# stellar-quorum-analyzer
+Library for analyzing Stellar network quorum properties

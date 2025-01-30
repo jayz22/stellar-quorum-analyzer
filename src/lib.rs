@@ -4,5 +4,9 @@ pub mod fbas;
 pub use fbas::*;
 pub mod fbas_analyze;
 pub use fbas_analyze::*;
+pub mod json_parser;
 
-pub use batsat::callbacks::{AsyncInterrupt, AsyncInterruptHandle, Callbacks};
+#[cfg(test)]
+mod test;
+
+pub use batsat::callbacks::Callbacks;
