@@ -1,4 +1,3 @@
-
 use crate::{FbasAnalyzer, SolveStatus};
 use batsat::callbacks::{AsyncInterrupt, Basic};
 use std::{io::BufRead, str::FromStr};
