@@ -58,6 +58,8 @@ $$
 \Pi^i = \binom{\text{num\_successors}(q_i)}{\text{threshold}(q_i)}
 $$
 
+and then $\Phi_i$ becomes:
+
 $$
 \Phi_i \equiv \bigvee_{j=0}^{J-1} \bigwedge_{k=0}^{K-1} \Pi^i_{j,k}
 $$
