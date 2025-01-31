@@ -69,9 +69,7 @@ $$
 \xi^i_j \leftrightarrow \bigwedge_{k=0}^{K-1} \Pi^i_{j,k}
 $$
 
-apply the equivalence transformation , substitude the implications, then apply distribution law on both parts) which is equivalent to:
-
-expanding the equivalence $a \leftrightarrow b \equiv \left(a \implies b\right) \bigwedge \left( b \implies a\right)$, and further expand it by applying the distribution law:
+expand the equivalence $a \leftrightarrow b \equiv \left(a \implies b\right) \bigwedge \left( b \implies a\right)$, and further expand it by applying the distribution law:
 
 $$
  \left( \bigwedge_{k=0}^{K-1} \left( \neg \xi^i_j \bigvee \Pi^i_{j,k} \right) \right) \bigwedge \left( \xi^i_j \left( \bigvee_{k=0}^{K-1}\neg \Pi^i_{j,k} \right) \right)

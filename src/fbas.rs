@@ -16,8 +16,8 @@ pub(crate) type QuorumSetMap = BTreeMap<String, Rc<InternalScpQuorumSet>>;
 /// cannot contain a cycle. This is different from transitive qset, which is
 /// obtained by extending the all dependent validators by including their
 /// dependent qsets (a validator can only depend on a single qsat, not other
-/// validators). Such transititive structure is described by the graph in `Fbas`.
-/// A leaf in a `Qsat` can only contain 1. validator or 2. vacumous qset (qset
+/// validators). Such transitive structure is described by the graph in `Fbas`.
+/// A leaf in a `Qset` can only contain 1. validator or 2. vacuous qset (qset
 /// with a threshold but empty validator list and inner-qset).
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Default)]
 pub(crate) struct Qset {

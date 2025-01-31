@@ -8,7 +8,7 @@ use petgraph::{csr::IndexType, graph::NodeIndex};
 
 // Two imaginary quorums A and B, and we have FBAS system with V vertices. Note
 // the a quorum contain validators, whereas a vertex can be either a validator
-// or a qset. The relation of each vertice being in each quorum is represented
+// or a qset. The relation of each vertex being in each quorum is represented
 // with one atomic variable (also known as a literal or `lit`). A `true` value
 // indicates the validator is in the quorum. Therefore the entire system has `2
 // * length(V)` such native atomics. Then we build a set of constrains that must
@@ -21,7 +21,7 @@ use petgraph::{csr::IndexType, graph::NodeIndex};
 // Constrain #1: A is not empty and B is not empty
 // Constrain #2: There do NOT exist a validator in both quorums
 // Constrain #3: If a vertex is in a quorum, then the quorum must satisfy its
-// dependencies. I.e. any threshold number out of all sucessors needs to be in
+// dependencies. I.e. any threshold number out of all successors needs to be in
 // the quorum as well.
 //
 // These three constrains must all be hold.
@@ -29,7 +29,7 @@ use petgraph::{csr::IndexType, graph::NodeIndex};
 // Before we send these constrains to a SAT solver, they must be transformed
 // into conjunction norm form (CNF). Thus a portion of work is to perform the
 // Tseitin transformation on the constrains into "AND of ORs", which also
-// introdues additional imaginary atomics. Once the solver produces a
+// introduces additional imaginary atomics. Once the solver produces a
 // satisfiable result (result == SAT), that means a disjoint quorum has been
 // found.
 
@@ -120,7 +120,7 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
         let fbas = &self.fbas;
         let fbas_lits = FbasLitsWrapper::new(fbas.graph.node_count());
 
-        // for each vertice in the graph, we add a variable representing it
+        // for each vertex in the graph, we add a variable representing it
         // belonging to quorum A and quorum B
         fbas.graph.node_indices().for_each(|_| {
             self.solver.new_var_default();
@@ -147,7 +147,7 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
             ]);
         });
 
-        // formula 3: qset relation for each vertice must be satisfied
+        // formula 3: qset relation for each vertex must be satisfied
         let mut add_clauses_for_quorum_relations =
             |in_quorum: &dyn Fn(&NodeIndex) -> Lit| -> Result<(), FbasError> {
                 fbas.graph.node_indices().try_for_each(|ni| {
