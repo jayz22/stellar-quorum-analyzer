@@ -474,7 +474,7 @@ dependencies = [
  "prettytable",
  "screwsat",
  "splr",
- "stellar-strkey 0.0.11",
+ "stellar-strkey",
  "stellar-xdr",
  "varisat",
 ]
@@ -491,16 +491,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "stellar-strkey"
-version = "0.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0989c9a05eccbd08b60e603a1c7e3ed3ec92c0de73b8681fc964d272ab2b2697"
-dependencies = [
- "crate-git-revision",
- "data-encoding",
-]
-
-[[package]]
 name = "stellar-xdr"
 version = "22.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -509,7 +499,7 @@ dependencies = [
  "crate-git-revision",
  "escape-bytes",
  "hex",
- "stellar-strkey 0.0.9",
+ "stellar-strkey",
 ]
 
 [[package]]
