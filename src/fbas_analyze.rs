@@ -152,9 +152,10 @@ impl<Cb: Callbacks> FbasAnalyzer<Cb> {
             |in_quorum: &dyn Fn(&NodeIndex) -> Lit| -> Result<(), FbasError> {
                 fbas.graph.node_indices().try_for_each(|ni| {
                     let aq_i = in_quorum(&ni);
-                    let nd = fbas.graph.node_weight(ni).ok_or_else(|| {
-                        FbasError::InternalError(format!("Node index {} not found", ni.index()))
-                    })?;
+                    let nd = fbas
+                        .graph
+                        .node_weight(ni)
+                        .ok_or_else(|| FbasError::InternalError("Node index not found"))?;
                     let threshold = nd.get_threshold();
                     let neighbors = fbas.graph.neighbors(ni);
                     let qset = neighbors.into_iter().combinations(threshold as usize);

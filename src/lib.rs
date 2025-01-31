@@ -10,4 +10,5 @@ pub(crate) mod json_parser;
 mod test;
 
 pub use batsat::callbacks::Callbacks;
+pub use fbas::FbasError;
 pub use fbas_analyze::{FbasAnalyzer, SolveStatus};

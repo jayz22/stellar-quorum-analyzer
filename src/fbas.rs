@@ -57,10 +57,10 @@ impl Vertex {
 
 #[derive(Debug)]
 pub enum FbasError {
-    ParseError(String),
+    ParseError(&'static str),
     MaxDepthExceeded,
-    XdrDecodingError(String),
-    InternalError(String),
+    XdrDecodingError(&'static str),
+    InternalError(&'static str),
 }
 
 impl std::error::Error for FbasError {}
@@ -114,10 +114,7 @@ impl Fbas {
     pub(crate) fn try_get_validator_string(&self, ni: &NodeIndex) -> Result<String, FbasError> {
         match self.graph.node_weight(*ni) {
             Some(Vertex::Validator(v)) => Ok(v.clone()),
-            _ => Err(FbasError::InternalError(format!(
-                "Node index {} is not a validator",
-                ni.index()
-            ))),
+            _ => Err(FbasError::InternalError("Node index is not a validator")),
         }
     }
 
@@ -136,7 +133,7 @@ impl Fbas {
         for (node_str, qset) in qsm.iter() {
             let v_idx = known_validators
                 .get(node_str)
-                .ok_or_else(|| FbasError::InternalError(format!("key {} not found", node_str)))?;
+                .ok_or_else(|| FbasError::InternalError("key not found"))?;
             let q_idx =
                 fbas.process_scp_quorum_set(qset, 0, &known_validators, &mut known_qsets)?;
             let _ = fbas.graph.add_edge(*v_idx, q_idx, ());
@@ -208,15 +205,16 @@ impl Fbas {
 
         for (node_buf, qset_buf) in nodes.zip(quorum_set) {
             let node = NodeId::from_xdr(node_buf, Limits::none())
-                .map_err(|e| FbasError::XdrDecodingError(e.to_string()))?;
+                .map_err(|_| FbasError::XdrDecodingError("NodeId cannot be decoded from xdr"))?;
             let node_str = match &node.0 {
                 PublicKey::PublicKeyTypeEd25519(key) => {
                     stellar_strkey::ed25519::PublicKey(key.0).to_string()
                 }
             };
             if !qset_buf.as_ref().is_empty() {
-                let qset = ScpQuorumSet::from_xdr(qset_buf, Limits::none())
-                    .map_err(|e| FbasError::XdrDecodingError(e.to_string()))?;
+                let qset = ScpQuorumSet::from_xdr(qset_buf, Limits::none()).map_err(|_| {
+                    FbasError::XdrDecodingError("ScpQuorumSet cannot be decoded from xdr")
+                })?;
                 quorum_set_map.insert(node_str, Rc::new(qset.into()));
             } else {
                 eprintln!("Validator {} is unknown", node_str);
@@ -225,7 +223,7 @@ impl Fbas {
 
         Self::from_quorum_set_map(quorum_set_map)
     }
-    
+
     #[cfg(any(feature = "json", test))]
     pub fn from_json_path(path: &str) -> Result<Self, FbasError> {
         let quorum_set_map = crate::json_parser::quorum_set_map_from_json(path)?;
