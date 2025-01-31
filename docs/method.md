@@ -55,7 +55,7 @@ This is not CNF form. So the remaining task is to expand this part, and transfor
 Define $\Pi^i$ the combinatorial set of $q_i$'s immediate successors:
 
 $$
- \Pi^i = \binom{\text{num\_successors}(q_i)}{\text{threshold}(q_i)}
+\Pi^i = \binom{\text{num\_successors}(q_i)}{\text{threshold}(q_i)}
 $$
 
 $$
