@@ -90,8 +90,10 @@ $$
 qsat_i^A = \bigwedge_{j=0}^{J-1} \left( \left( \bigwedge_{k=0}^{K-1} \left(\neg Aq_i \bigvee \neg \xi^i_j \bigvee \Pi^i_{j,k} \right) \right) \bigwedge \left( \neg Aq_i \bigvee \xi^i_j \left( \bigvee_{k=0}^{K-1}\neg \Pi^i_{j,k} \right) \right) \right) \bigwedge \left(  \neg Aq_i \bigvee_{j=0}^{J-1} \xi^{i}_{j} \right)
 $$
 
-In the end we combine this into the master constrain for all vertices `V`
+In the end we combine this into the master constrain for all vertices `V`:
+
 $$
 \bigwedge_{i=0}^{V-1} qsat_i^A \bigwedge qsat_i^B
 $$
+
 and we get our third constrain in CNF form.
