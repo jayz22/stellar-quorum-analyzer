@@ -21,13 +21,16 @@ Both quorums A and B must be non-empty:
 $$
 \left(\bigvee_{i=0}^{N-1}  Av_i\right)\bigwedge\left(\bigvee_{i=0}^{N-1}  Bv_i\right)
 $$
+
 This is already in CNF form. We generate `N` (`N` is the number of eligible validators) constraints corresponding to each clause in the parentheses.
 
 #### 2. **Non-Intersecting Quorums**. 
 Quorum A and B do not intersect (i.e., no validator exists in both quorums)
+
 $$
 \bigwedge_{i=0}^{i=N-1} \left(\neg Av_i \bigvee \neg Bv_i \right)
 $$
+
 This is also in CNF form. We add N constraints, one for each eligible validator.
 
 #### 3. Quorum Satisfaction by Transitive QSets
@@ -50,6 +53,7 @@ This is not CNF form. So the remaining task is to expand this part, and transfor
 ##### Expansion of $\Phi_i$
 
 Define $\Pi^i$ the combinatorial set of $q_i$'s immediate successors:
+
 $$
  \Pi^i = \binom{\text{num\_successors}(q_i)}{\text{threshold}(q_i)}
 $$
